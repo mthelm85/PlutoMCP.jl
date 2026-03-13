@@ -185,6 +185,7 @@ The bridge must be running before the MCP client connects.
 If the bridge is not running the tools will return a clear error.
 """
 function serve(; pluto_port=1234, mcp_port=2346, notebook=nothing, launch_browser=true)
+    @eval using Pluto
     options = Pluto.Configuration.from_flat_kwargs(;
         port           = pluto_port,
         launch_browser = launch_browser,
