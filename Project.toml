@@ -1,0 +1,7 @@
+name = "PlutoMCP"
+uuid = "22d0dc7c-8f49-4890-9bf9-be4a32466a36"
+authors = ["Matt Helm <mthelm85@gmail.com> and contributors"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.9"
