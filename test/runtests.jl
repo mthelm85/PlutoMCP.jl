@@ -150,25 +150,30 @@ end
     # MCP protocol round-trip tests (no network, no Pluto web server)
     # ---------------------------------------------------------------------------
 
+    # Helper: write a newline-delimited JSON message to a buffer
+    function write_msg(buf, msg)
+        write(buf, PlutoMCP.JSON3.write(msg))
+        write(buf, '\n')
+    end
+
+    # Helper: read one newline-delimited JSON response from a buffer
+    function read_resp(buf)
+        seekstart(buf)
+        PlutoMCP.JSON3.read(readline(buf; keep=false), Dict{String,Any})
+    end
+
     @testset "MCP protocol: initialize" begin
         session, nb, _ = make_session_with_notebook("x = 7")
 
         buf_in  = IOBuffer()
         buf_out = IOBuffer()
 
-        msg  = Dict("jsonrpc" => "2.0", "id" => 1, "method" => "initialize", "params" => Dict())
-        body = PlutoMCP.JSON3.write(msg)
-        write(buf_in, "Content-Length: $(sizeof(body))\r\n\r\n$(body)")
+        write_msg(buf_in, Dict("jsonrpc" => "2.0", "id" => 1, "method" => "initialize", "params" => Dict()))
         seekstart(buf_in)
 
         PlutoMCP.run_mcp_server(session, buf_in, buf_out)
 
-        seekstart(buf_out)
-        header = rstrip(readline(buf_out), '\r')
-        readline(buf_out)  # blank line
-        n    = parse(Int, split(header, ": ")[2])
-        resp = PlutoMCP.JSON3.read(String(read(buf_out, n)), Dict{String,Any})
-
+        resp = read_resp(buf_out)
         @test resp["result"]["protocolVersion"] == PlutoMCP.MCP_PROTOCOL_VERSION
         @test resp["result"]["serverInfo"]["name"] == "PlutoMCP"
     end
@@ -179,28 +184,22 @@ end
         buf_in  = IOBuffer()
         buf_out = IOBuffer()
 
-        msg  = Dict("jsonrpc" => "2.0", "id" => 2, "method" => "tools/list", "params" => Dict())
-        body = PlutoMCP.JSON3.write(msg)
-        write(buf_in, "Content-Length: $(sizeof(body))\r\n\r\n$(body)")
+        write_msg(buf_in, Dict("jsonrpc" => "2.0", "id" => 2, "method" => "tools/list", "params" => Dict()))
         seekstart(buf_in)
 
         PlutoMCP.run_mcp_server(session, buf_in, buf_out)
 
-        seekstart(buf_out)
-        header = rstrip(readline(buf_out), '\r')
-        readline(buf_out)
-        n     = parse(Int, split(header, ": ")[2])
-        resp  = PlutoMCP.JSON3.read(String(read(buf_out, n)), Dict{String,Any})
+        resp  = read_resp(buf_out)
         names = [t["name"] for t in resp["result"]["tools"]]
 
-        @test "list_notebooks"   ∈ names
+        @test "list_notebooks"     ∈ names
         @test "get_notebook_state" ∈ names
-        @test "set_cell_code"    ∈ names
-        @test "add_cell"         ∈ names
-        @test "delete_cell"      ∈ names
-        @test "run_cell"         ∈ names
-        @test "run_all_cells"    ∈ names
-        @test "move_cell"        ∈ names
+        @test "set_cell_code"      ∈ names
+        @test "add_cell"           ∈ names
+        @test "delete_cell"        ∈ names
+        @test "run_cell"           ∈ names
+        @test "run_all_cells"      ∈ names
+        @test "move_cell"          ∈ names
     end
 
     @testset "MCP protocol: tools/call list_notebooks" begin
@@ -209,20 +208,13 @@ end
         buf_in  = IOBuffer()
         buf_out = IOBuffer()
 
-        msg = Dict("jsonrpc" => "2.0", "id" => 3, "method" => "tools/call",
-            "params" => Dict("name" => "list_notebooks", "arguments" => Dict{String,Any}()))
-        body = PlutoMCP.JSON3.write(msg)
-        write(buf_in, "Content-Length: $(sizeof(body))\r\n\r\n$(body)")
+        write_msg(buf_in, Dict("jsonrpc" => "2.0", "id" => 3, "method" => "tools/call",
+            "params" => Dict("name" => "list_notebooks", "arguments" => Dict{String,Any}())))
         seekstart(buf_in)
 
         PlutoMCP.run_mcp_server(session, buf_in, buf_out)
 
-        seekstart(buf_out)
-        header = rstrip(readline(buf_out), '\r')
-        readline(buf_out)
-        n    = parse(Int, split(header, ": ")[2])
-        resp = PlutoMCP.JSON3.read(String(read(buf_out, n)), Dict{String,Any})
-
+        resp = read_resp(buf_out)
         @test resp["result"]["isError"] == false
         data = PlutoMCP.JSON3.read(resp["result"]["content"][1]["text"])
         @test length(data) == 1
@@ -235,19 +227,12 @@ end
         buf_in  = IOBuffer()
         buf_out = IOBuffer()
 
-        msg  = Dict("jsonrpc" => "2.0", "id" => 4, "method" => "nonexistent", "params" => Dict())
-        body = PlutoMCP.JSON3.write(msg)
-        write(buf_in, "Content-Length: $(sizeof(body))\r\n\r\n$(body)")
+        write_msg(buf_in, Dict("jsonrpc" => "2.0", "id" => 4, "method" => "nonexistent", "params" => Dict()))
         seekstart(buf_in)
 
         PlutoMCP.run_mcp_server(session, buf_in, buf_out)
 
-        seekstart(buf_out)
-        header = rstrip(readline(buf_out), '\r')
-        readline(buf_out)
-        n    = parse(Int, split(header, ": ")[2])
-        resp = PlutoMCP.JSON3.read(String(read(buf_out, n)), Dict{String,Any})
-
+        resp = read_resp(buf_out)
         @test haskey(resp, "error")
         @test resp["error"]["code"] == -32601
     end

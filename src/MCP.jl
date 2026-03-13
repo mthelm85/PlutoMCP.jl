@@ -124,26 +124,17 @@ const MCP_TOOLS = [
 # ---------------------------------------------------------------------------
 
 function _read_message(io::IO)
-    content_length = -1
     while !eof(io)
-        line = readline(io)
-        line = rstrip(line, '\r')
-        isempty(line) && break
-        if startswith(line, "Content-Length: ")
-            content_length = parse(Int, strip(line[17:end]))
-        end
+        line = readline(io; keep=false)
+        isempty(strip(line)) && continue
+        return JSON3.read(line, Dict{String,Any})
     end
-    content_length < 0 && return nothing
-    eof(io) && return nothing
-    body = String(read(io, content_length))
-    return JSON3.read(body, Dict{String,Any})
+    return nothing
 end
 
 function _write_message(io::IO, msg)
-    body   = JSON3.write(msg)
-    nbytes = sizeof(body)
-    write(io, "Content-Length: $nbytes\r\n\r\n")
-    write(io, body)
+    write(io, JSON3.write(msg))
+    write(io, '\n')
     flush(io)
 end
 
