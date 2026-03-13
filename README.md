@@ -22,7 +22,7 @@ Pluto.ServerSession / Pluto.Notebook  (port 1234)
 Browser  (passive live view)
 ```
 
-You start the bridge once when you want Claude to have access. It connects to the notebooks you already have open. Claude Desktop connects to the running bridge — it never spawns a Pluto process itself.
+You start the bridge once when you want Claude to have access. It starts a fresh Pluto session; open notebooks through the Pluto browser UI that `serve()` prints. Claude Desktop connects to the running bridge — it never spawns a Pluto process itself.
 
 ---
 
@@ -84,7 +84,7 @@ For older Claude Desktop versions that do not yet support HTTP/SSE MCP:
 }
 ```
 
-`connect()` is a tiny stdio↔HTTP proxy. It adds no Pluto overhead and starts in seconds. The bridge (`serve()`) must already be running.
+`connect()` is a self-contained MCP stdio server. It starts immediately and lazily starts its own Pluto session on the first tool call — no separate `serve()` process needed.
 
 #### Cursor
 
@@ -237,7 +237,7 @@ The MCP transport is **HTTP/SSE** (Server-Sent Events). The bridge exposes three
 | `POST /message?sessionId=...` | Receives JSON-RPC 2.0 requests |
 | `GET /health` | Returns `ok` (used by `connect()` to probe the bridge) |
 
-The `connect()` stdio proxy bridges Content-Length–framed JSON-RPC on stdin/stdout to these HTTP endpoints, for clients that require a subprocess.
+The `connect()` stdio server reads and writes newline-delimited JSON-RPC 2.0 on stdin/stdout, dispatching MCP calls directly without going through the HTTP/SSE bridge. It starts its own Pluto session lazily on first use, so clients that require a subprocess get a fast startup.
 
 ---
 
