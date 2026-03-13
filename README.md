@@ -2,27 +2,27 @@
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://mthelm85.github.io/PlutoMCP.jl/stable/)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://mthelm85.github.io/PlutoMCP.jl/dev/)
-[![Build Status](https://github.com/mthelm85/PlutoMCP.jl/actions/workflows/CI.yml/badge.svg?branch=master)](https://github.com/mthelm85/PlutoMCP.jl/actions/workflows/CI.yml?query=branch%3Amaster)
+[![Build Status](https://github.com/mthelm85/PlutoMCP.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/mthelm85/PlutoMCP.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
 **PlutoMCP.jl** exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that lets MCP-compatible AI tools — Claude Desktop, Cursor, and others — inspect and manipulate live [Pluto.jl](https://plutojl.org) notebooks in real time.
 
-The AI edits cells and triggers execution through the MCP server. Pluto's reactive runtime propagates changes, and the user's browser updates live. The browser is a passive view — it does not need to know an AI is involved.
-
 ```
-AI Tool (Claude Desktop, Cursor, …)
-        │
-        │  MCP over stdio
-        ▼
-PlutoMCP.jl  (Julia process)
-        │
-        │  direct Julia API calls
-        ▼
-Pluto.ServerSession / Pluto.Notebook
-        │
-        │  WebSocket push
-        ▼
+You (terminal)            AI Tool (Claude Desktop, …)
+      │                             │
+      │ PlutoMCP.serve()            │  MCP over HTTP/SSE
+      ▼                             ▼
+PlutoMCP bridge  ◄────────── http://localhost:2346/sse
+      │
+      │  direct Julia API calls
+      ▼
+Pluto.ServerSession / Pluto.Notebook  (port 1234)
+      │
+      │  WebSocket push
+      ▼
 Browser  (passive live view)
 ```
+
+You start the bridge once when you want Claude to have access. It connects to the notebooks you already have open. Claude Desktop connects to the running bridge — it never spawns a Pluto process itself.
 
 ---
 
@@ -37,68 +37,65 @@ Pkg.add("PlutoMCP")
 
 ## Quick start
 
-Instead of launching Pluto directly, launch it through PlutoMCP:
+### Step 1 — Start the bridge (whenever you want Claude access)
 
 ```julia
 using PlutoMCP
 
-PlutoMCP.serve()                        # Pluto on port 1234 (default)
-PlutoMCP.serve(port = 4321)             # explicit port
-PlutoMCP.serve(notebook = "my_nb.jl")  # open a notebook on start
+PlutoMCP.serve()                              # Pluto on :1234, MCP bridge on :2346
+PlutoMCP.serve(pluto_port=4321)              # custom Pluto port
+PlutoMCP.serve(notebook="my_nb.jl")         # open a notebook on start
+PlutoMCP.serve(pluto_port=1234, mcp_port=3000)  # custom MCP port
 ```
 
-`serve()` starts the Pluto web server and the MCP stdio listener in the same Julia process, then blocks. Open the printed URL in your browser as usual — everything works exactly like a normal Pluto session.
+`serve()` starts Pluto in the background and blocks, running the MCP HTTP/SSE server. Open the printed Pluto URL in your browser as usual.
 
----
+### Step 2 — Configure your MCP client (one-time)
 
-## MCP client configuration
+#### Claude Desktop — HTTP (preferred)
 
-### Claude Desktop
+Add to `claude_desktop_config.json`
+(`~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows):
 
-Add the following to `claude_desktop_config.json` (found at `~/Library/Application Support/Claude/` on macOS or `%APPDATA%\Claude\` on Windows):
+```json
+{
+  "mcpServers": {
+    "pluto": {
+      "url": "http://localhost:2346/sse"
+    }
+  }
+}
+```
+
+Claude Desktop connects to the running bridge. **No Pluto process is started by Claude Desktop.** If the bridge is not running, tool calls return a clear error message.
+
+#### Claude Desktop — stdio fallback
+
+For older Claude Desktop versions that do not yet support HTTP/SSE MCP:
 
 ```json
 {
   "mcpServers": {
     "pluto": {
       "command": "julia",
-      "args": ["-e", "using PlutoMCP; PlutoMCP.serve()"]
+      "args": ["-e", "using PlutoMCP; PlutoMCP.connect()"]
     }
   }
 }
 ```
 
-To open a specific notebook automatically:
+`connect()` is a tiny stdio↔HTTP proxy. It adds no Pluto overhead and starts in seconds. The bridge (`serve()`) must already be running.
+
+#### Cursor
 
 ```json
 {
   "mcpServers": {
     "pluto": {
-      "command": "julia",
-      "args": ["-e", "using PlutoMCP; PlutoMCP.serve(notebook=\"/path/to/notebook.jl\")"]
+      "url": "http://localhost:2346/sse"
     }
   }
 }
-```
-
-### Cursor
-
-```json
-{
-  "mcpServers": {
-    "pluto": {
-      "command": "julia",
-      "args": ["-e", "using PlutoMCP; PlutoMCP.serve()"],
-      "transport": "stdio"
-    }
-  }
-}
-```
-
-### Generic stdio MCP client
-
-```
-julia -e 'using PlutoMCP; PlutoMCP.serve(port=1234)'
 ```
 
 ---
@@ -226,14 +223,21 @@ When a tool call fails, the result has `"isError": true` and a structured body:
 
 ## How it works
 
-PlutoMCP runs **inside the same Julia process as Pluto**. It holds a reference to the live `Pluto.ServerSession` and manipulates `Pluto.Notebook` objects directly via Pluto's internal Julia API — the same functions the Pluto frontend calls, but invoked in-process rather than over HTTP.
+PlutoMCP runs **inside the same Julia process as Pluto**. It holds a reference to the live `Pluto.ServerSession` and manipulates `Pluto.Notebook` objects directly via Pluto's internal Julia API — the same functions the Pluto frontend calls, but invoked in-process.
 
 This means:
-- No subprocess spawning, no inter-process communication
 - Cell edits trigger Pluto's full reactive scheduler — dependent cells re-run automatically
 - The browser stays in sync via Pluto's normal WebSocket push mechanism
 
-The MCP transport is **stdio** (not HTTP/SSE). When Claude Desktop or Cursor launches the `julia` command from your MCP config, it communicates with PlutoMCP over that process's stdin/stdout using the standard Content-Length–framed JSON-RPC 2.0 protocol.
+The MCP transport is **HTTP/SSE** (Server-Sent Events). The bridge exposes three endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /sse` | Establishes the SSE stream; returns a `sessionId` |
+| `POST /message?sessionId=...` | Receives JSON-RPC 2.0 requests |
+| `GET /health` | Returns `ok` (used by `connect()` to probe the bridge) |
+
+The `connect()` stdio proxy bridges Content-Length–framed JSON-RPC on stdin/stdout to these HTTP endpoints, for clients that require a subprocess.
 
 ---
 
