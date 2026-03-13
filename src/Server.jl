@@ -186,8 +186,9 @@ For stdio clients, use `connect()` instead — it starts Pluto lazily on first u
 """
 function serve(; pluto_port=1234, mcp_port=2346, notebook=nothing, launch_browser=true)
     @eval using Pluto
-    # `Pluto` binding was added in the new world age; define a helper there so it
-    # can resolve the name, then call it via invokelatest.
+    # `Pluto` binding was added in the new world age; define a helper there and
+    # call it via @eval so both the binding lookup and call happen in the latest
+    # world (avoids Julia 1.12+ "prior world" binding warning / malfunction).
     @eval function __pluto_serve_init__(pluto_port, launch_browser, notebook)
         opts = Pluto.Configuration.from_flat_kwargs(
             port           = pluto_port,
@@ -205,7 +206,7 @@ function serve(; pluto_port=1234, mcp_port=2346, notebook=nothing, launch_browse
         sleep(1.0)  # brief pause so Pluto is up before MCP clients connect
         sess
     end
-    pluto_session = Base.invokelatest(__pluto_serve_init__, pluto_port, launch_browser, notebook)
+    pluto_session = @eval __pluto_serve_init__($pluto_port, $launch_browser, $notebook)
 
     @info "PlutoMCP ready"
     @info "  Pluto UI       → http://localhost:$pluto_port"
@@ -263,7 +264,7 @@ function connect(; pluto_port=1234)
                 sleep(1.0)
                 sess
             end
-            pluto_session[] = Base.invokelatest(__pluto_connect_init__, pluto_port)
+            pluto_session[] = @eval __pluto_connect_init__($pluto_port)
         end
         pluto_session[]
     end
