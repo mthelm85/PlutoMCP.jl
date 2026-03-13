@@ -193,44 +193,51 @@ function _safe_handle_tool_call(session, name, arguments)
 end
 
 # ---------------------------------------------------------------------------
-# Main server loop
+# JSON-RPC dispatch (shared by stdio and HTTP/SSE transports)
+# ---------------------------------------------------------------------------
+
+function _dispatch_mcp(session, msg::Dict{String,Any})
+    method = get(msg, "method", "")
+    id     = get(msg, "id", nothing)
+
+    # Notifications have no id and require no response
+    id === nothing && return nothing
+
+    if method == "initialize"
+        _ok(id, Dict{String,Any}(
+            "protocolVersion" => MCP_PROTOCOL_VERSION,
+            "capabilities"    => Dict{String,Any}("tools" => Dict{String,Any}()),
+            "serverInfo"      => Dict{String,Any}("name" => MCP_SERVER_NAME, "version" => MCP_SERVER_VERSION),
+        ))
+
+    elseif method == "tools/list"
+        _ok(id, Dict{String,Any}("tools" => MCP_TOOLS))
+
+    elseif method == "tools/call"
+        params    = get(msg, "params", Dict{String,Any}())
+        name      = get(params, "name", "")
+        arguments = get(params, "arguments", Dict{String,Any}())
+        result    = _safe_handle_tool_call(session, name, arguments)
+        _ok(id, result)
+
+    elseif method == "ping"
+        _ok(id, Dict{String,Any}())
+
+    else
+        _err(id, -32601, "Method not found: $method")
+    end
+end
+
+# ---------------------------------------------------------------------------
+# stdio loop (used directly by tests and by connect() proxy)
 # ---------------------------------------------------------------------------
 
 function run_mcp_server(session, io_in::IO=stdin, io_out::IO=stdout)
     while !eof(io_in)
         msg = _read_message(io_in)
         msg === nothing && break
-
-        method = get(msg, "method", "")
-        id     = get(msg, "id", nothing)
-
-        # Notifications (no id) require no response
-        id === nothing && continue
-
-        response = if method == "initialize"
-            _ok(id, Dict{String,Any}(
-                "protocolVersion" => MCP_PROTOCOL_VERSION,
-                "capabilities"    => Dict{String,Any}("tools" => Dict{String,Any}()),
-                "serverInfo"      => Dict{String,Any}("name" => MCP_SERVER_NAME, "version" => MCP_SERVER_VERSION),
-            ))
-
-        elseif method == "tools/list"
-            _ok(id, Dict{String,Any}("tools" => MCP_TOOLS))
-
-        elseif method == "tools/call"
-            params    = get(msg, "params", Dict{String,Any}())
-            name      = get(params, "name", "")
-            arguments = get(params, "arguments", Dict{String,Any}())
-            result    = _safe_handle_tool_call(session, name, arguments)
-            _ok(id, result)
-
-        elseif method == "ping"
-            _ok(id, Dict{String,Any}())
-
-        else
-            _err(id, -32601, "Method not found: $method")
-        end
-
-        _write_message(io_out, response)
+        resp = _dispatch_mcp(session, msg)
+        resp === nothing && continue
+        _write_message(io_out, resp)
     end
 end
