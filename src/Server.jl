@@ -124,6 +124,23 @@ function _run_http_mcp_server(pluto_session, port::Int)
         elseif method == "POST" && startswith(target, "/message")
             _handle_post(http, pluto_session)
 
+        elseif method == "POST" && startswith(target, "/call")
+            body = String(read(http))
+            msg  = try
+                JSON3.read(body, Dict{String,Any})
+            catch
+                HTTP.setstatus(http, 400)
+                HTTP.startwrite(http)
+                write(http, """{"error":"Invalid JSON"}""")
+                return
+            end
+            resp     = _dispatch_mcp(pluto_session, msg)
+            resp_json = resp !== nothing ? JSON3.write(resp) : "{}"
+            HTTP.setstatus(http, 200)
+            HTTP.setheader(http, "Content-Type" => "application/json")
+            HTTP.startwrite(http)
+            write(http, resp_json)
+
         elseif method == "GET" && target == "/health"
             HTTP.setstatus(http, 200)
             HTTP.startwrite(http)
@@ -221,14 +238,28 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    connect(; pluto_port=1234)
+    connect(; pluto_port=1234, mcp_port=2346)
 
 Self-contained stdio MCP server for clients that require a stdio subprocess
 (e.g. Claude Desktop).
 
-Responds to `initialize`, `tools/list`, and `ping` instantly without loading
-Pluto.  Pluto is started lazily on the **first `tools/call`**, so Claude Desktop
-starts up immediately and Pluto only runs when you actually use a PlutoMCP tool.
+**If a `PlutoMCP.serve()` bridge is already running at `mcp_port`**, this
+function proxies all MCP calls through it — so tool calls reach the live Pluto
+session that `serve()` owns, including any notebooks you have open in your
+browser.
+
+**If no bridge is running**, it falls back to standalone mode: Pluto is started
+lazily on the first `tools/call`.
+
+## Recommended workflow
+
+1. Start the bridge once in a terminal:
+   ```julia
+   using PlutoMCP
+   PlutoMCP.serve()   # Pluto on :1234, MCP bridge on :2346
+   ```
+2. Open notebooks in the Pluto browser UI.
+3. Claude Desktop (configured below) will find them automatically.
 
 ## Claude Desktop config
 
@@ -243,7 +274,58 @@ starts up immediately and Pluto only runs when you actually use a PlutoMCP tool.
 }
 ```
 """
-function connect(; pluto_port=1234)
+function connect(; pluto_port=1234, mcp_port=2346)
+    # Check if a PlutoMCP HTTP bridge is already running.
+    bridge_running = try
+        resp = HTTP.get("http://127.0.0.1:$mcp_port/health";
+                        readtimeout=2, connect_timeout=1)
+        resp.status == 200
+    catch
+        false
+    end
+
+    if bridge_running
+        @info "PlutoMCP: bridge detected at :$mcp_port — proxying stdio through it"
+        _run_stdio_proxy(mcp_port)
+    else
+        _run_standalone_stdio(pluto_port)
+    end
+end
+
+# ---------------------------------------------------------------------------
+# Proxy mode: forward stdio MCP calls to an existing HTTP bridge via /call
+# ---------------------------------------------------------------------------
+
+function _run_stdio_proxy(mcp_port::Int)
+    while !eof(stdin)
+        msg = _read_message(stdin)
+        msg === nothing && break
+
+        id = get(msg, "id", nothing)
+        # Notifications (no id) require no response
+        id === nothing && continue
+
+        resp = try
+            r = HTTP.post(
+                "http://127.0.0.1:$mcp_port/call";
+                body    = JSON3.write(msg),
+                headers = ["Content-Type" => "application/json"],
+                readtimeout = 120,
+            )
+            JSON3.read(String(r.body), Dict{String,Any})
+        catch e
+            _err(id, -32603, "Bridge proxy error: $(sprint(showerror, e))")
+        end
+
+        _write_message(stdout, resp)
+    end
+end
+
+# ---------------------------------------------------------------------------
+# Standalone mode: lazily start own Pluto on first tools/call
+# ---------------------------------------------------------------------------
+
+function _run_standalone_stdio(pluto_port::Int)
     pluto_session = Ref{Any}(nothing)
 
     function _get_session()

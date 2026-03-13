@@ -9,20 +9,20 @@
 ```
 You (terminal)            AI Tool (Claude Desktop, …)
       │                             │
-      │ PlutoMCP.serve()            │  MCP over HTTP/SSE
+      │ PlutoMCP.serve()            │  stdio → auto-proxies to bridge
       ▼                             ▼
-PlutoMCP bridge  ◄────────── http://localhost:2346/sse
-      │
+PlutoMCP bridge  ◄────────── connect() detects :2346 and proxies
+      │                   OR connects directly via HTTP/SSE
       │  direct Julia API calls
       ▼
 Pluto.ServerSession / Pluto.Notebook  (port 1234)
       │
       │  WebSocket push
       ▼
-Browser  (passive live view)
+Browser  (live view — notebooks you open here are visible to AI tools)
 ```
 
-You start the bridge once when you want Claude to have access. It starts a fresh Pluto session; open notebooks through the Pluto browser UI that `serve()` prints. Claude Desktop connects to the running bridge — it never spawns a Pluto process itself.
+You start the bridge once when you want Claude to have access. It starts a fresh Pluto session; open notebooks through the Pluto browser UI that `serve()` prints. Claude Desktop configured with `connect()` (stdio) **automatically detects the running bridge** and proxies through it — no reconfiguration needed.
 
 ---
 
@@ -48,7 +48,9 @@ PlutoMCP.serve(notebook="my_nb.jl")         # open a notebook on start
 PlutoMCP.serve(pluto_port=1234, mcp_port=3000)  # custom MCP port
 ```
 
-`serve()` starts Pluto in the background and blocks, running the MCP HTTP/SSE server. Open the printed Pluto URL in your browser as usual.
+`serve()` starts Pluto in the background and blocks, running the MCP HTTP/SSE server. Open the printed Pluto URL in your browser as usual. **Any notebooks you open in the browser are immediately visible to Claude.**
+
+> **Important**: open your notebooks through the Pluto UI started by `serve()`, not through a separately-started `Pluto.run()`. The MCP bridge owns its own Pluto session; notebooks from other Pluto processes are not shared.
 
 ### Step 2 — Configure your MCP client (one-time)
 
@@ -69,9 +71,7 @@ Add to `claude_desktop_config.json`
 
 Claude Desktop connects to the running bridge. **No Pluto process is started by Claude Desktop.** If the bridge is not running, tool calls return a clear error message.
 
-#### Claude Desktop — stdio fallback
-
-For older Claude Desktop versions that do not yet support HTTP/SSE MCP:
+#### Claude Desktop — stdio (recommended for most users)
 
 ```json
 {
@@ -84,7 +84,12 @@ For older Claude Desktop versions that do not yet support HTTP/SSE MCP:
 }
 ```
 
-`connect()` is a self-contained MCP stdio server. It starts immediately and lazily starts its own Pluto session on the first tool call — no separate `serve()` process needed.
+`connect()` automatically detects whether a `PlutoMCP.serve()` bridge is running:
+
+- **Bridge running** (recommended): proxies all tool calls through the bridge, so Claude sees the live Pluto session and any notebooks you have open.
+- **No bridge**: starts its own isolated Pluto session lazily on the first tool call.
+
+In both cases Claude Desktop starts up instantly — no waiting for Julia at launch time.
 
 #### Cursor
 
