@@ -186,18 +186,18 @@ For stdio clients, use `connect()` instead — it starts Pluto lazily on first u
 """
 function serve(; pluto_port=1234, mcp_port=2346, notebook=nothing, launch_browser=true)
     @eval using Pluto
-    options = Pluto.Configuration.from_flat_kwargs(;
+    options = Base.invokelatest(Pluto.Configuration.from_flat_kwargs;
         port           = pluto_port,
         launch_browser = launch_browser,
     )
-    pluto_session = Pluto.ServerSession(; options)
+    pluto_session = Base.invokelatest(Pluto.ServerSession; options)
 
     if notebook !== nothing
-        Pluto.SessionActions.open(pluto_session, notebook; run_async=true)
+        Base.invokelatest(Pluto.SessionActions.open, pluto_session, notebook; run_async=true)
     end
 
     @async try
-        Pluto.run!(pluto_session)
+        Base.invokelatest(Pluto.run!, pluto_session)
     catch e
         @error "Pluto server error" exception=(e, catch_backtrace())
     end
@@ -246,13 +246,13 @@ function connect(; pluto_port=1234)
         if pluto_session[] === nothing
             @info "PlutoMCP: first tool call — starting Pluto (this may take ~30 s)…"
             @eval using Pluto
-            opts = Pluto.Configuration.from_flat_kwargs(;
+            opts = Base.invokelatest(Pluto.Configuration.from_flat_kwargs;
                 port           = pluto_port,
                 launch_browser = false,
             )
-            sess = Pluto.ServerSession(; options = opts)
+            sess = Base.invokelatest(Pluto.ServerSession; options = opts)
             @async try
-                Pluto.run!(sess)
+                Base.invokelatest(Pluto.run!, sess)
             catch e
                 @error "Pluto server error" exception=(e, catch_backtrace())
             end
