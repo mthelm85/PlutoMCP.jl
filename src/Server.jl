@@ -181,8 +181,8 @@ Then configure your MCP client **once**:
 }
 ```
 
-The bridge must be running before the MCP client connects.
-If the bridge is not running the tools will return a clear error.
+The bridge must be running before an HTTP/SSE client connects.
+For stdio clients, use `connect()` instead — it starts Pluto lazily on first use.
 """
 function serve(; pluto_port=1234, mcp_port=2346, notebook=nothing, launch_browser=true)
     @eval using Pluto
@@ -212,16 +212,21 @@ function serve(; pluto_port=1234, mcp_port=2346, notebook=nothing, launch_browse
     _run_http_mcp_server(pluto_session, mcp_port)
 end
 
+# ---------------------------------------------------------------------------
+# Public API (continued)
+# ---------------------------------------------------------------------------
+
 """
-    connect(; mcp_port=2346)
+    connect(; pluto_port=1234)
 
-Lightweight stdio↔HTTP proxy for MCP clients that require a stdio subprocess.
+Self-contained stdio MCP server for clients that require a stdio subprocess
+(e.g. Claude Desktop).
 
-Forwards JSON-RPC from stdin to a running PlutoMCP bridge (`serve()`) and relays
-responses back to stdout.  Start the bridge first; this command is fast and adds
-no Pluto overhead.
+Responds to `initialize`, `tools/list`, and `ping` instantly without loading
+Pluto.  Pluto is started lazily on the **first `tools/call`**, so Claude Desktop
+starts up immediately and Pluto only runs when you actually use a PlutoMCP tool.
 
-## Claude Desktop config (stdio fallback)
+## Claude Desktop config
 
 ```json
 {
@@ -234,66 +239,42 @@ no Pluto overhead.
 }
 ```
 """
-function connect(; mcp_port=2346)
-    base_url   = "http://localhost:$mcp_port"
-    session_id = Ref("")
-    connected  = Channel{Bool}(1)
+function connect(; pluto_port=1234)
+    pluto_session = Ref{Any}(nothing)
 
-    # SSE reader task — runs in the background for the life of the connection
-    @async begin
-        try
-            HTTP.open("GET", "$base_url/sse";
-                      headers    = ["Accept" => "text/event-stream"],
-                      connect_timeout = 5) do http
-                event = ""
-                for line in eachline(http)
-                    line = rstrip(line)
-                    if startswith(line, "event: ")
-                        event = line[8:end]
-                    elseif startswith(line, "data: ")
-                        data = line[7:end]
-                        if event == "endpoint"
-                            m = match(r"sessionId=([^&\s]+)", data)
-                            if m !== nothing
-                                session_id[] = m[1]
-                                put!(connected, true)
-                            end
-                        elseif event == "message" && !isempty(data)
-                            msg = JSON3.read(data, Dict{String,Any})
-                            _write_message(stdout, msg)
-                        end
-                        event = ""
-                    end
-                end
+    function _get_session()
+        if pluto_session[] === nothing
+            @info "PlutoMCP: first tool call — starting Pluto (this may take ~30 s)…"
+            @eval using Pluto
+            opts = Pluto.Configuration.from_flat_kwargs(;
+                port           = pluto_port,
+                launch_browser = false,
+            )
+            sess = Pluto.ServerSession(; options = opts)
+            @async try
+                Pluto.run!(sess)
+            catch e
+                @error "Pluto server error" exception=(e, catch_backtrace())
             end
-        catch
-            isready(connected) || put!(connected, false)
+            sleep(1.0)
+            pluto_session[] = sess
         end
+        pluto_session[]
     end
 
-    # Wait up to 5 s for the SSE handshake
-    status = timedwait(() -> isready(connected), 5.0)
-    ok     = status == :ok && take!(connected)
-
-    if !ok
-        @error "PlutoMCP bridge not running at $base_url" *
-               " — start it with: julia -e 'using PlutoMCP; PlutoMCP.serve()'"
-        return
-    end
-
-    # Forward stdin → POST
     while !eof(stdin)
         msg = _read_message(stdin)
         msg === nothing && break
-        try
-            HTTP.post(
-                "$base_url/message?sessionId=$(session_id[])",
-                ["Content-Type" => "application/json"],
-                JSON3.write(msg);
-                retry = false,
-            )
-        catch
-            break
-        end
+
+        method = get(msg, "method", "")
+        id     = get(msg, "id", nothing)
+
+        # Notifications (no id) require no response
+        id === nothing && continue
+
+        sess = method == "tools/call" ? _get_session() : nothing
+        resp = _dispatch_mcp(sess, msg)
+        resp === nothing && continue
+        _write_message(stdout, resp)
     end
 end
