@@ -116,6 +116,7 @@ function tool_set_cell_code(session, args)
 
     if run_after
         Pluto.update_save_run!(session, nb, [cell]; run_async=false, save=true)
+        _notify_browser(session, nb)
     else
         nb.topology = Pluto.updated_topology(nb.topology, nb, [cell])
         Pluto.save_notebook(session, nb)
@@ -145,6 +146,7 @@ function tool_add_cell(session, args)
 
     if run_after
         Pluto.update_save_run!(session, nb, [new_cell]; run_async=false, save=true)
+        _notify_browser(session, nb)
     else
         nb.topology = Pluto.updated_topology(nb.topology, nb, [new_cell])
         Pluto.save_notebook(session, nb)
@@ -166,6 +168,7 @@ function tool_delete_cell(session, args)
 
     # Passing no cells lets run_reactive detect the removed cell and clean up
     Pluto.update_save_run!(session, nb, Pluto.Cell[]; run_async=false, save=true)
+    _notify_browser(session, nb)
 
     Dict{String,Any}("deleted" => true, "cell_id" => cell_id_str)
 end
@@ -182,6 +185,7 @@ function tool_run_cell(session, args)
         _wait_for_cell(cell; timeout=TOOL_TIMEOUT_SECONDS)
     end
 
+    _notify_browser(session, nb)
     _cell_to_dict(cell)
 end
 
@@ -190,6 +194,7 @@ function tool_run_all_cells(session, args)
     wait_for = get(args, "wait_for_completion", false)
 
     Pluto.update_save_run!(session, nb, nb.cells; run_async=!wait_for, save=true)
+    _notify_browser(session, nb)
 
     Dict{String,Any}(
         "notebook_id" => string(nb.notebook_id),
