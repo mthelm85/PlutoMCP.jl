@@ -30,7 +30,7 @@ You start the bridge once when you want Claude to have access. It starts a fresh
 
 ```julia
 using Pkg
-Pkg.add("PlutoMCP")
+Pkg.add(url="https://github.com/mthelm85/PlutoMCP.jl")
 ```
 
 ---
