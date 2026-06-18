@@ -76,6 +76,56 @@ function _notify_browser(session, notebook)
     end
 end
 
+# Assign a new cell_order vector instead of mutating in place. Pluto's Firebasey
+# diff caches cell_order by reference; in-place push!/insert!/deleteat! updates
+# the cached snapshot too, so no cell_order patch reaches connected browsers.
+function _set_cell_order!(notebook, new_order::Vector{UUID})
+    notebook.cell_order = new_order
+    return notebook
+end
+
+function _insert_cell_after!(notebook, after_id::UUID, new_id::UUID)
+    target_idx = findfirst(==(after_id), notebook.cell_order)
+    target_idx === nothing &&
+        throw(KeyError("cell_not_found::Cell '$after_id' not found in notebook"))
+    _set_cell_order!(notebook, [
+        notebook.cell_order[1:target_idx]...,
+        new_id,
+        notebook.cell_order[target_idx+1:end]...,
+    ])
+end
+
+function _append_cell!(notebook, new_id::UUID)
+    _set_cell_order!(notebook, [notebook.cell_order..., new_id])
+end
+
+function _remove_cell_from_order!(notebook, cell_id::UUID)
+    _set_cell_order!(notebook, filter(!=(cell_id), notebook.cell_order))
+end
+
+function _move_cell_in_order!(notebook, cell_id::UUID, after_cell_id)
+    order = collect(notebook.cell_order)
+    old_idx = findfirst(==(cell_id), order)
+    old_idx === nothing && throw(KeyError("cell_not_found::Cell not found in cell_order"))
+    deleteat!(order, old_idx)
+
+    if after_cell_id == ""
+        insert!(order, 1, cell_id)
+    else
+        target_id = try
+            UUID(after_cell_id)
+        catch
+            throw(ArgumentError("invalid_cell_id::Invalid cell ID: '$after_cell_id'"))
+        end
+        new_idx = findfirst(==(target_id), order)
+        new_idx === nothing &&
+            throw(KeyError("cell_not_found::Target cell '$after_cell_id' not found"))
+        insert!(order, new_idx + 1, cell_id)
+    end
+
+    _set_cell_order!(notebook, order)
+end
+
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
@@ -136,12 +186,14 @@ function tool_add_cell(session, args)
     nb.cells_dict[new_cell.cell_id] = new_cell
 
     if after_cell_id === nothing || after_cell_id == ""
-        push!(nb.cell_order, new_cell.cell_id)
+        _append_cell!(nb, new_cell.cell_id)
     else
-        target_id  = try UUID(after_cell_id) catch; throw(ArgumentError("invalid_cell_id::Invalid cell ID: '$after_cell_id'")) end
-        target_idx = findfirst(==(target_id), nb.cell_order)
-        target_idx === nothing && throw(KeyError("cell_not_found::Cell '$after_cell_id' not found in notebook"))
-        insert!(nb.cell_order, target_idx + 1, new_cell.cell_id)
+        target_id = try
+            UUID(after_cell_id)
+        catch
+            throw(ArgumentError("invalid_cell_id::Invalid cell ID: '$after_cell_id'"))
+        end
+        _insert_cell_after!(nb, target_id, new_cell.cell_id)
     end
 
     if run_after
@@ -162,8 +214,7 @@ function tool_delete_cell(session, args)
 
     cell_id_str = string(cell.cell_id)
 
-    idx = findfirst(==(cell.cell_id), nb.cell_order)
-    idx !== nothing && deleteat!(nb.cell_order, idx)
+    _remove_cell_from_order!(nb, cell.cell_id)
     delete!(nb.cells_dict, cell.cell_id)
 
     # Passing no cells lets run_reactive detect the removed cell and clean up
@@ -207,18 +258,7 @@ function tool_move_cell(session, args)
     cell          = _get_cell(nb, args["cell_id"])
     after_cell_id = args["after_cell_id"]
 
-    old_idx = findfirst(==(cell.cell_id), nb.cell_order)
-    old_idx === nothing && throw(KeyError("cell_not_found::Cell not found in cell_order"))
-    deleteat!(nb.cell_order, old_idx)
-
-    if after_cell_id == ""
-        insert!(nb.cell_order, 1, cell.cell_id)
-    else
-        target_id  = try UUID(after_cell_id) catch; throw(ArgumentError("invalid_cell_id::Invalid cell ID: '$after_cell_id'")) end
-        new_idx    = findfirst(==(target_id), nb.cell_order)
-        new_idx === nothing && throw(KeyError("cell_not_found::Target cell '$after_cell_id' not found"))
-        insert!(nb.cell_order, new_idx + 1, cell.cell_id)
-    end
+    _move_cell_in_order!(nb, cell.cell_id, after_cell_id)
 
     Pluto.save_notebook(session, nb)
     _notify_browser(session, nb)

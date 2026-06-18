@@ -88,6 +88,18 @@ end
         @test nb.cell_order[2] == UUID(result["cell_id"])
     end
 
+    @testset "add_cell assigns new cell_order vector" begin
+        session, nb, cells = make_session_with_notebook("first", "last")
+        order_before = nb.cell_order
+        args = Dict(
+            "notebook_id" => string(nb.notebook_id),
+            "code"        => "tail",
+            "run_after"   => false,
+        )
+        PlutoMCP.tool_add_cell(session, args)
+        @test nb.cell_order !== order_before
+    end
+
     @testset "delete_cell" begin
         session, nb, cells = make_session_with_notebook("x = 1", "y = 2")
         args = Dict(
@@ -249,7 +261,9 @@ end
         tmp = tempname() * ".jl"
         cp(fixture, tmp)
 
-        session    = Pluto.ServerSession()
+        session = Pluto.ServerSession(;
+            options = Pluto.Configuration.from_flat_kwargs(launch_browser = false),
+        )
         pluto_task = @async Pluto.run!(session)
         sleep(3.0)
 

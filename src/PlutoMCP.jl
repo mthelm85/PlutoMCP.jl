@@ -3,6 +3,7 @@ module PlutoMCP
 using JSON3
 using UUIDs
 using HTTP
+using Pluto
 
 include("Tools.jl")
 include("MCP.jl")
