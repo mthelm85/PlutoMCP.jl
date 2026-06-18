@@ -50,6 +50,8 @@ PlutoMCP.serve(pluto_port=1234, mcp_port=3000)  # custom MCP port
 
 `serve()` starts Pluto in the background and blocks, running the MCP HTTP/SSE server. Open the printed Pluto URL in your browser as usual. **Any notebooks you open in the browser are immediately visible to Claude.**
 
+> **`require_secret_for_access`:** forwarded to Pluto `Options` (default `true`). Pass `false` to open `http://localhost:PORT/` without a `?secret=` URL.
+
 > **Important**: open your notebooks through the Pluto UI started by `serve()`, not through a separately-started `Pluto.run()`. The MCP bridge owns its own Pluto session; notebooks from other Pluto processes are not shared.
 
 ### Step 2 — Configure your MCP client (one-time)
