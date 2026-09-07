@@ -164,14 +164,14 @@ end
 
     # Helper: write a newline-delimited JSON message to a buffer
     function write_msg(buf, msg)
-        write(buf, PlutoMCP.JSON3.write(msg))
+        write(buf, PlutoMCP.JSON.json(msg))
         write(buf, '\n')
     end
 
     # Helper: read one newline-delimited JSON response from a buffer
     function read_resp(buf)
         seekstart(buf)
-        PlutoMCP.JSON3.read(readline(buf; keep=false), Dict{String,Any})
+        PlutoMCP.JSON.parse(readline(buf; keep=false), Dict{String,Any})
     end
 
     @testset "MCP protocol: initialize" begin
@@ -228,7 +228,7 @@ end
 
         resp = read_resp(buf_out)
         @test resp["result"]["isError"] == false
-        data = PlutoMCP.JSON3.read(resp["result"]["content"][1]["text"])
+        data = PlutoMCP.JSON.parse(resp["result"]["content"][1]["text"])
         @test length(data) == 1
         @test data[1]["notebook_id"] == string(nb.notebook_id)
     end
