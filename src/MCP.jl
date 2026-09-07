@@ -1,6 +1,10 @@
 const MCP_PROTOCOL_VERSION = "2024-11-05"
 const MCP_SERVER_NAME      = "PlutoMCP"
-const MCP_SERVER_VERSION   = "1.0.0"
+# Derived from Project.toml so the version reported to MCP clients cannot
+# drift away from the released package version.
+const MCP_SERVER_VERSION   = let v = pkgversion(@__MODULE__)
+    v === nothing ? "unknown" : string(v)
+end
 
 # ---------------------------------------------------------------------------
 # Tool schema definitions
