@@ -62,24 +62,10 @@ PlutoMCP.serve(pluto_port=1234, mcp_port=3000)  # custom MCP port
 
 ### Step 2 — Configure your MCP client (one-time)
 
-#### Claude Desktop — HTTP (preferred)
+#### Claude Desktop — stdio
 
-Add to `claude_desktop_config.json`
-(`~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows):
-
-```json
-{
-  "mcpServers": {
-    "pluto": {
-      "url": "http://localhost:2346/sse"
-    }
-  }
-}
-```
-
-Claude Desktop connects to the running bridge. **No Pluto process is started by Claude Desktop.** If the bridge is not running, tool calls return a clear error message.
-
-#### Claude Desktop — stdio (recommended for most users)
+`claude_desktop_config.json` supports **stdio servers only** (`command` / `args` / `env`).
+It has no `url` field, so this is the way to wire up Claude Desktop:
 
 ```json
 {
@@ -94,12 +80,51 @@ Claude Desktop connects to the running bridge. **No Pluto process is started by 
 
 `connect()` automatically detects whether a `PlutoMCP.serve()` bridge is running:
 
-- **Bridge running** (recommended): proxies all tool calls through the bridge, so Claude sees the live Pluto session and any notebooks you have open.
+- **Bridge running** (recommended): proxies all tool calls through the bridge, so Claude sees the
+  live Pluto session and any notebooks you have open in your browser.
 - **No bridge**: starts its own isolated Pluto session lazily on the first tool call.
 
-In both cases Claude Desktop starts up instantly — no waiting for Julia at launch time.
+> **Startup cost.** Claude Desktop launches this process every time it starts, and it must load
+> Julia and Pluto before it can answer the MCP handshake — roughly **13 s**, and about **800 MB**
+> resident while idle. No Pluto *server* is started until you actually call a tool, but the
+> process itself is always there. If that bothers you, use the `mcp-remote` setup below and start
+> the bridge only when you want it.
 
-#### Cursor
+#### Claude Desktop — HTTP via `mcp-remote`
+
+Claude Desktop cannot talk to `http://localhost:2346/sse` directly. Its config file is stdio-only,
+and custom connectors (Settings → Connectors) reach the server from Anthropic's cloud, so they
+require a public HTTPS endpoint — a localhost address is unreachable that way.
+
+To use the HTTP bridge, bridge stdio to it with [`mcp-remote`](https://www.npmjs.com/package/mcp-remote):
+
+```json
+{
+  "mcpServers": {
+    "pluto": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:2346/sse"]
+    }
+  }
+}
+```
+
+This spawns a small Node process (~38 MB) instead of a Julia one, and starts no Pluto session of
+its own — all tool calls go to the `serve()` bridge. If the bridge is not running, the server
+fails to connect and its tools are simply unavailable until you start it.
+
+#### Claude Code — HTTP (native)
+
+Claude Code speaks HTTP/SSE directly, so it needs **no local process at all**:
+
+```bash
+claude mcp add --transport sse pluto http://localhost:2346/sse
+```
+
+Nothing runs when the bridge is down; Claude Code reports the server as failed to connect and
+everything else keeps working. Start `serve()` and the tools appear.
+
+#### Cursor — HTTP
 
 ```json
 {
@@ -250,7 +275,7 @@ The MCP transport is **HTTP/SSE** (Server-Sent Events). The bridge exposes three
 | `POST /message?sessionId=...` | Receives JSON-RPC 2.0 requests |
 | `GET /health` | Returns `ok` (used by `connect()` to probe the bridge) |
 
-The `connect()` stdio server reads and writes newline-delimited JSON-RPC 2.0 on stdin/stdout, dispatching MCP calls directly without going through the HTTP/SSE bridge. It starts its own Pluto session lazily on first use, so clients that require a subprocess get a fast startup.
+The `connect()` stdio server reads and writes newline-delimited JSON-RPC 2.0 on stdin/stdout, dispatching MCP calls directly without going through the HTTP/SSE bridge. It starts its own Pluto *session* lazily on first tool call — but `using PlutoMCP` loads Pluto at import, so the process still takes ~13 s to answer the initial handshake and holds ~800 MB while idle. When a `serve()` bridge is already running, `connect()` proxies to it instead of starting a second session.
 
 ---
 

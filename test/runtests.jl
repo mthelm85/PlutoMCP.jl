@@ -188,6 +188,16 @@ end
         resp = read_resp(buf_out)
         @test resp["result"]["protocolVersion"] == PlutoMCP.MCP_PROTOCOL_VERSION
         @test resp["result"]["serverInfo"]["name"] == "PlutoMCP"
+        @test resp["result"]["serverInfo"]["version"] == PlutoMCP.MCP_SERVER_VERSION
+    end
+
+    @testset "serverInfo.version tracks Project.toml" begin
+        # Regression: MCP_SERVER_VERSION was hardcoded to "1.0.0" and silently
+        # drifted from the released version for several releases.
+        toml = read(joinpath(pkgdir(PlutoMCP), "Project.toml"), String)
+        m    = match(r"(?m)^version\s*=\s*\"([^\"]+)\"", toml)
+        @test m !== nothing
+        @test PlutoMCP.MCP_SERVER_VERSION == m.captures[1]
     end
 
     @testset "MCP protocol: tools/list" begin
