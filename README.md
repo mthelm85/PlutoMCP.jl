@@ -50,7 +50,13 @@ PlutoMCP.serve(pluto_port=1234, mcp_port=3000)  # custom MCP port
 
 `serve()` starts Pluto in the background and blocks, running the MCP HTTP/SSE server. Open the printed Pluto URL in your browser as usual. **Any notebooks you open in the browser are immediately visible to Claude.**
 
-> **`require_secret_for_access`:** forwarded to Pluto `Options` (default `true`). Pass `false` to open `http://localhost:PORT/` without a `?secret=` URL.
+> **`require_secret_for_access`:** forwarded to Pluto `Options` (default `true`). Pass `false` to open
+> `http://localhost:PORT/` without a `?secret=` URL — useful for MCP clients that cannot navigate to a
+> secret URL, or over a trusted SSH port-forward.
+>
+> :warning: **The secret is Pluto's only access control.** With `require_secret_for_access=false`, anything
+> that can reach the port can execute arbitrary Julia code as you — including other users of a shared
+> machine. Only turn it off on a single-user machine or a trusted port-forward.
 
 > **Important**: open your notebooks through the Pluto UI started by `serve()`, not through a separately-started `Pluto.run()`. The MCP bridge owns its own Pluto session; notebooks from other Pluto processes are not shared.
 
