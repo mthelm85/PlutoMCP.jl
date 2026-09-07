@@ -218,31 +218,21 @@ function serve(;
     launch_browser=true,
     require_secret_for_access=true,
 )
-    @eval using Pluto
-    # `Pluto` binding was added in the new world age; define a helper there and
-    # call it via @eval so both the binding lookup and call happen in the latest
-    # world (avoids Julia 1.12+ "prior world" binding warning / malfunction).
-    @eval function __pluto_serve_init__(pluto_port, launch_browser, notebook, require_secret_for_access)
-        opts = Pluto.Configuration.from_flat_kwargs(
-            port                      = pluto_port,
-            launch_browser            = launch_browser,
-            require_secret_for_access = require_secret_for_access,
-        )
-        sess = Pluto.ServerSession(; options = opts)
-        if notebook !== nothing
-            Pluto.SessionActions.open(sess, notebook; run_async = true)
-        end
-        @async try
-            Pluto.run!(sess)
-        catch e
-            @error "Pluto server error" exception=(e, catch_backtrace())
-        end
-        sleep(1.0)  # brief pause so Pluto is up before MCP clients connect
-        sess
-    end
-    pluto_session = @eval __pluto_serve_init__(
-        $pluto_port, $launch_browser, $notebook, $require_secret_for_access,
+    opts = Pluto.Configuration.from_flat_kwargs(
+        port                      = pluto_port,
+        launch_browser            = launch_browser,
+        require_secret_for_access = require_secret_for_access,
     )
+    pluto_session = Pluto.ServerSession(; options = opts)
+    if notebook !== nothing
+        Pluto.SessionActions.open(pluto_session, notebook; run_async = true)
+    end
+    @async try
+        Pluto.run!(pluto_session)
+    catch e
+        @error "Pluto server error" exception=(e, catch_backtrace())
+    end
+    sleep(1.0)  # brief pause so Pluto is up before MCP clients connect
 
     @info "PlutoMCP ready"
     @info "  Pluto UI       → http://localhost:$pluto_port"
@@ -352,26 +342,20 @@ function _run_standalone_stdio(pluto_port::Int; require_secret_for_access=true)
 
     function _get_session()
         if pluto_session[] === nothing
-            @info "PlutoMCP: first tool call — starting Pluto (this may take ~30 s)…"
-            @eval using Pluto
-            @eval function __pluto_connect_init__(pluto_port, require_secret_for_access)
-                opts = Pluto.Configuration.from_flat_kwargs(
-                    port                      = pluto_port,
-                    launch_browser            = false,
-                    require_secret_for_access = require_secret_for_access,
-                )
-                sess = Pluto.ServerSession(; options = opts)
-                @async try
-                    Pluto.run!(sess)
-                catch e
-                    @error "Pluto server error" exception=(e, catch_backtrace())
-                end
-                sleep(1.0)
-                sess
-            end
-            pluto_session[] = @eval __pluto_connect_init__(
-                $pluto_port, $require_secret_for_access,
+            @info "PlutoMCP: first tool call — starting Pluto…"
+            opts = Pluto.Configuration.from_flat_kwargs(
+                port                      = pluto_port,
+                launch_browser            = false,
+                require_secret_for_access = require_secret_for_access,
             )
+            sess = Pluto.ServerSession(; options = opts)
+            @async try
+                Pluto.run!(sess)
+            catch e
+                @error "Pluto server error" exception=(e, catch_backtrace())
+            end
+            sleep(1.0)
+            pluto_session[] = sess
         end
         pluto_session[]
     end
