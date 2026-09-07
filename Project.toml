@@ -1,7 +1,7 @@
 name = "PlutoMCP"
 uuid = "22d0dc7c-8f49-4890-9bf9-be4a32466a36"
 authors = ["Matt Helm <mthelm85@gmail.com> and contributors"]
-version = "1.3.0"
+version = "1.3.1"
 
 [deps]
 HTTP  = "cd3eb016-35fb-5094-929b-558a96fad6f3"
@@ -12,5 +12,5 @@ UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 [compat]
 HTTP  = "1"
 JSON  = "1"
-Pluto = "0.19, 0.20"
+Pluto = "0.19, 0.20, 1"
 julia = "1.9"
