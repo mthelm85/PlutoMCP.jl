@@ -165,7 +165,14 @@ end
 
 Start a Pluto server and expose it via an MCP HTTP/SSE interface.
 
-Forwards `require_secret_for_access` to Pluto `Options` (default `true`).
+Forwards `require_secret_for_access` to Pluto `Options` (default `true`). Pass `false`
+to serve `http://localhost:PORT/` without a `?secret=` URL.
+
+!!! warning
+    The secret is Pluto's only access control. With `require_secret_for_access=false`,
+    anything that can reach the port can execute arbitrary Julia code as you — including
+    other users of a shared machine. Only turn it off on a single-user machine or a
+    trusted port-forward.
 
 ## Workflow
 
@@ -254,7 +261,9 @@ end
 
 Self-contained stdio MCP server for clients that require a stdio subprocess
 (e.g. Claude Desktop). Forwards `require_secret_for_access` when starting its
-own Pluto session (default `true`; see [`serve`](@ref)).
+own Pluto session (default `true`) — see the warning in [`serve`](@ref) before
+setting it to `false`. Ignored in proxy mode, which uses the running `serve()`
+session's own configuration.
 
 **If a `PlutoMCP.serve()` bridge is already running at `mcp_port`**, this
 function proxies all MCP calls through it — so tool calls reach the live Pluto
