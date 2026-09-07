@@ -1,6 +1,6 @@
 module PlutoMCP
 
-using JSON3
+using JSON
 using UUIDs
 using HTTP
 using Pluto

@@ -85,7 +85,7 @@ function _handle_post(http::HTTP.Stream, pluto_session)
 
     body = String(read(http))
     msg  = try
-        JSON3.read(body, Dict{String,Any})
+        JSON.parse(body, Dict{String,Any})
     catch
         HTTP.setstatus(http, 400)
         HTTP.startwrite(http)
@@ -94,7 +94,7 @@ function _handle_post(http::HTTP.Stream, pluto_session)
     end
 
     resp = _dispatch_mcp(pluto_session, msg)
-    isopen(ch) && resp !== nothing && put!(ch, JSON3.write(resp))
+    isopen(ch) && resp !== nothing && put!(ch, JSON.json(resp))
 
     HTTP.setstatus(http, 202)
     HTTP.startwrite(http)
@@ -127,7 +127,7 @@ function _run_http_mcp_server(pluto_session, port::Int)
         elseif method == "POST" && startswith(target, "/call")
             body = String(read(http))
             msg  = try
-                JSON3.read(body, Dict{String,Any})
+                JSON.parse(body, Dict{String,Any})
             catch
                 HTTP.setstatus(http, 400)
                 HTTP.startwrite(http)
@@ -135,7 +135,7 @@ function _run_http_mcp_server(pluto_session, port::Int)
                 return
             end
             resp     = _dispatch_mcp(pluto_session, msg)
-            resp_json = resp !== nothing ? JSON3.write(resp) : "{}"
+            resp_json = resp !== nothing ? JSON.json(resp) : "{}"
             HTTP.setstatus(http, 200)
             HTTP.setheader(http, "Content-Type" => "application/json")
             HTTP.startwrite(http)
@@ -308,11 +308,11 @@ function _run_stdio_proxy(mcp_port::Int)
         resp = try
             r = HTTP.post(
                 "http://127.0.0.1:$mcp_port/call";
-                body    = JSON3.write(msg),
+                body    = JSON.json(msg),
                 headers = ["Content-Type" => "application/json"],
                 readtimeout = 120,
             )
-            JSON3.read(String(r.body), Dict{String,Any})
+            JSON.parse(String(r.body), Dict{String,Any})
         catch e
             _err(id, -32603, "Bridge proxy error: $(sprint(showerror, e))")
         end
